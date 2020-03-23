@@ -12,7 +12,7 @@ steps:
 - name: build arm client
   image: golang:1.13.8
   commands:
-  - go build -a -v -ldflags="-w -s" client
+  - go build -a -v -ldflags="-w -s" srt/client
   environment:
     GOARCH: arm
     GOARM: 5
