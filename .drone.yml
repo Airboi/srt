@@ -8,7 +8,8 @@ platform:
   os: linux
 
 base: /go
-path: src/github.com/lochv/srt steps:
+path: src/github.com/lochv/srt 
+steps:
   
 - name: build arm client
   image: golang:1.13.8
