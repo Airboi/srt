@@ -14,7 +14,7 @@ steps:
 - name: build arm client
   image: golang:1.13.8
   commands:
-  - go get ./...
+  - go get golang.org/x/crypto/ssh
   - go build -a -v -ldflags="-w -s" ./client
   environment:
     GOPATH: /drone
