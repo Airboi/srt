@@ -17,6 +17,7 @@ steps:
   - go get ./...
   - go build -a -v -ldflags="-w -s" ./client
   environment:
+    GOPATH: /drone
     GOARCH: arm
     GOARM: 5
 
