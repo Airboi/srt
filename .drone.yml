@@ -16,7 +16,7 @@ steps:
   commands:
   - go get golang.org/x/crypto/ssh
   - go get golang.org/x/net/context
-  - go build -a -v -ldflags="-w -s" ./client -o ./client.armv5
+  - go build -o ./client.armv5 -a -v -ldflags="-w -s" ./client
   environment:
     GOPATH: /drone
     GOARCH: arm
