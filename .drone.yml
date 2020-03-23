@@ -14,9 +14,7 @@ steps:
 - name: build arm client
   image: golang:1.13.8
   commands:
-  - pwd
-  - ls
-  - go build -a -v -ldflags="-w -s" client
+  - go build -a -v -ldflags="-w -s" ./client
   environment:
     GOARCH: arm
     GOARM: 5
