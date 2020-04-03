@@ -5,13 +5,20 @@ import (
 	"fmt"
 	"golang.org/x/crypto/ssh"
 	"net"
-	"os"
 	"srt/client/go-socks5"
 	"time"
 )
 
-var chanExit = make(chan int)
-
+var (
+	chanExit = make(chan int)
+	SSHHost = ""
+	SSHPort = ""
+	SSHUser = ""
+	SSHPwd  = ""
+	SocksUser = ""
+	SocksPwd = ""
+	Tag = ""
+)
 const (
 	CHAN_FORWARD   = "RbgEySPMPi"
 	CHAN_HEARTBEAT = "uSYeIbUQoR"
@@ -20,6 +27,7 @@ const (
 )
 
 type Config struct {
+	Tag       string
 	SSHHost   string
 	SSHPort   string
 	SSHUser   string
@@ -71,7 +79,6 @@ func (c *Client) handleChannels(chans <-chan ssh.NewChannel) {
 }
 
 func (c *Client) handleChannel(newChannel ssh.NewChannel) {
-
 	channel, requests, err := newChannel.Accept()
 	if err != nil {
 		return
@@ -80,9 +87,10 @@ func (c *Client) handleChannel(newChannel ssh.NewChannel) {
 	chanType := newChannel.ChannelType()
 	switch chanType {
 	case CHAN_FORWARD:
-		c.SockServer.ServeConn(channel, c.ServerAddr)
+		go c.SockServer.ServeConn(channel, c.ServerAddr)
 	case CHAN_HEARTBEAT:
 		go func() {
+			channel.Write([]byte(c.Config.Tag))
 			bufConn := bufio.NewReader(channel)
 			tcommand := make([]byte, 4)
 			for {
@@ -98,12 +106,13 @@ func (c *Client) handleChannel(newChannel ssh.NewChannel) {
 			tcommand := make([]byte, 256)
 			for {
 				n, err := bufConn.Read(tcommand)
-				if err == nil {
-					if string(tcommand[:n]) == COMMAND_KILL {
-						chanExit <- 1
-						return
-					}
-				} else {
+				if err != nil {
+					return
+				}
+				command := string(tcommand[:n])
+				switch command {
+				case COMMAND_KILL:
+					chanExit <- 1
 					return
 				}
 			}
@@ -111,7 +120,7 @@ func (c *Client) handleChannel(newChannel ssh.NewChannel) {
 	}
 }
 
-func (c *Client) startSock() {
+func (c *Client) startSocks() {
 	cred := socks5.StaticCredentials{
 		c.Config.SocksUser: c.Config.SocksPwd,
 	}
@@ -126,20 +135,18 @@ func (c *Client) startSock() {
 }
 
 func main() {
-	if len(os.Args) != 7 {
-		return
-	}
 	c := &Client{
 		Config: &Config{
-			SSHHost:   os.Args[1],
-			SSHPort:   os.Args[2],
-			SSHUser:   os.Args[3],
-			SSHPwd:    os.Args[4],
-			SocksUser: os.Args[5],
-			SocksPwd:  os.Args[6],
+			SSHHost:   SSHHost,
+			SSHPort:   SSHPort,
+			SSHUser:   SSHUser,
+			SSHPwd:    SSHPwd,
+			SocksUser: SocksUser,
+			SocksPwd:  SocksPwd,
+			Tag:       Tag,
 		},
 	}
-	c.startSock()
+	c.startSocks()
 	c.connect()
 	<-chanExit
 }

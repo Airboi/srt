@@ -39,14 +39,15 @@ type Session struct {
 	SessionId    int
 	sshConn      *ssh.ServerConn
 	Disconnected bool
+	Tag          string
 }
 
 type Server struct {
-	SSHServerConfig        *Config
-	ProxyServerConfig      *Config
-	Sessions         []Session
-	CurrentSessionId int
-	LastSessionId    int
+	SSHServerConfig   *Config
+	ProxyServerConfig *Config
+	Sessions          []Session
+	CurrentSessionId  int
+	LastSessionId     int
 }
 
 func (s *Server) startProxy() {
@@ -101,7 +102,7 @@ E1IkB7PYsNCRMC3d1ODaayj6Oj6w8lGtDqCY5x/hvuaHBHLf1aLod7XpsHXdCvLiOCjqMD
 6oIeepGe6zwtpClPas9FEEXGcmbZPdo+I3CAW3o53Y5xFeHv23J9nP1Asqxu1FWHRiPegi
 03fxvekB6qkv8yGXAAAACmN5Y3JhY2suaW8=
 -----END OPENSSH PRIVATE KEY-----
-`
+	`
 	private, err := ssh.ParsePrivateKey([]byte(privateBytes))
 	if err != nil {
 		panic("Failed to parse private key")
@@ -137,7 +138,7 @@ E1IkB7PYsNCRMC3d1ODaayj6Oj6w8lGtDqCY5x/hvuaHBHLf1aLod7XpsHXdCvLiOCjqMD
 		}
 		s.Sessions = append(s.Sessions, sess)
 		mutex.Unlock()
-		log.Printf("New SSH connection from %s (%s)", sshConn.RemoteAddr(), sshConn.ClientVersion())
+		log.Printf("New client from %s (%s)", sshConn.RemoteAddr(), sshConn.ClientVersion())
 		go ssh.DiscardRequests(reqs)
 		go s.keepAlive(sess.SessionId)
 		go handleChannels(chans)
@@ -145,15 +146,30 @@ E1IkB7PYsNCRMC3d1ODaayj6Oj6w8lGtDqCY5x/hvuaHBHLf1aLod7XpsHXdCvLiOCjqMD
 }
 
 func (s *Server) keepAlive(id int) {
-	newChan, _, err := s.Sessions[id].sshConn.OpenChannel(CHAN_HEARTBEAT, []byte(s.SSHServerConfig.String()))
+	kChan, _, err := s.Sessions[id].sshConn.OpenChannel(CHAN_HEARTBEAT, []byte(s.SSHServerConfig.String()))
 	if err != nil {
 		fmt.Println(err.Error())
 		s.Sessions[id].Disconnected = true
 		return
 	}
+	r := bufio.NewReader(kChan)
+	tag := make([]byte, 256)
+	n, err := r.Read(tag)
+	if err != nil {
+		mutex.Lock()
+		s.Sessions[id].Disconnected = true
+		if s.CurrentSessionId == id {
+			s.CurrentSessionId = -1
+		}
+		mutex.Unlock()
+		return
+	}
+	mutex.Lock()
+	s.Sessions[id].Tag = string(tag[:n])
+	mutex.Unlock()
 	for {
 		time.Sleep(10 * time.Second)
-		_, err := newChan.Write([]byte("ping"))
+		_, err := kChan.Write([]byte("ping"))
 		if err != nil {
 			mutex.Lock()
 			s.Sessions[id].Disconnected = true
@@ -245,11 +261,11 @@ func main() {
 				if session.Disconnected {
 					continue
 				}
-				data := []string{strconv.Itoa(session.SessionId), session.sshConn.RemoteAddr().String()}
+				data := []string{strconv.Itoa(session.SessionId), session.sshConn.RemoteAddr().String(), session.Tag}
 				datas = append(datas, data)
 			}
 			table := tablewriter.NewWriter(os.Stdout)
-			table.SetHeader([]string{"Id", "Address"})
+			table.SetHeader([]string{"Id", "Address", "Tag"})
 			for _, v := range datas {
 				table.Append(v)
 			}
@@ -262,7 +278,7 @@ func main() {
 		if cmd[0] == "use" {
 			if len(cmd) == 2 {
 				if id, err := strconv.Atoi(cmd[1]); err == nil {
-					if id <= s.LastSessionId && id > -1 {
+					if id <= s.LastSessionId && id > -2 {
 						if s.Sessions[id].Disconnected {
 							fmt.Println("that session was disconnected")
 							continue
@@ -284,7 +300,6 @@ func main() {
 						cmdChan, _, err := s.Sessions[id].sshConn.OpenChannel(CHAN_COMMAND, []byte(s.SSHServerConfig.String()))
 						if err == nil {
 							cmdChan.Write([]byte(COMMAND_KILL))
-							//cmdChan.Close()
 						} else {
 							fmt.Println(err.Error())
 						}
