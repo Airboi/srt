@@ -11,4 +11,5 @@ steps:
   - name: test
     image: golang:1.13.0
     commands:
+      - make dep
       - make build
