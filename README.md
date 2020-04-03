@@ -7,8 +7,18 @@ SSH Reverse Tunnel
 
 ---------
 ****Build****
- - make dep
- - make build
+ - edit config in Makefile:
+ ```
+ SSHHost = your-ssh-server-ip
+ SSHPort = your-ssh-server-port
+ SSHUser = your-ssh-server-user
+ SSHPwd = your-ssh-server-password
+ SocksUser = your-socks-server-user
+ SocksPwd = your-socks-server-pwd
+ Tag = client-tag
+ ```
+ - ~#:make dep
+ - ~#:make build
 
 ---------
 ****Usage****
