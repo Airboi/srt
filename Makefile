@@ -5,6 +5,7 @@ SSHPwd = fuckingkey
 SocksUser = foo
 SocksPwd = bar
 Tag = mail-server
+
 SERVER_SOURCE = ./server/...
 CLIENT_SOURCE = ./client/...
 LDFLAGS="-s -w -X main.SSHHost=$(SSHHost) -X main.SSHPort=$(SSHPort) -X main.SSHUser=$(SSHUser) -X main.SSHPwd=$(SSHPwd) -X main.SocksUser=$(SocksUser) -X main.SocksPwd=$(SocksPwd) -X main.Tag=$(Tag)"
@@ -12,8 +13,6 @@ GCFLAGS="all=-trimpath=$GOPATH"
 
 CLIENT_BINARY=client
 SERVER_BINARY=server
-
-TAGS=release
 
 OSARCH = "linux/amd64 linux/386 linux/arm windows/amd64 windows/386 darwin/amd64 darwin/386"
 
