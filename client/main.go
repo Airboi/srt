@@ -6,19 +6,21 @@ import (
 	"golang.org/x/crypto/ssh"
 	"net"
 	"srt/client/go-socks5"
+	"srt/clientlib/go-socks5"
 	"time"
 )
 
 var (
-	chanExit = make(chan int)
-	SSHHost = ""
-	SSHPort = ""
-	SSHUser = ""
-	SSHPwd  = ""
+	chanExit  = make(chan int)
+	SSHHost   = ""
+	SSHPort   = ""
+	SSHUser   = ""
+	SSHPwd    = ""
 	SocksUser = ""
-	SocksPwd = ""
-	Tag = ""
+	SocksPwd  = ""
+	Tag       = ""
 )
+
 const (
 	CHAN_FORWARD   = "RbgEySPMPi"
 	CHAN_HEARTBEAT = "uSYeIbUQoR"

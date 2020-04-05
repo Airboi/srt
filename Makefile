@@ -6,10 +6,12 @@ SocksUser = foo
 SocksPwd = bar
 Tag = mail-server
 
+
 SERVER_SOURCE = ./server/...
 CLIENT_SOURCE = ./client/...
 LDFLAGS="-s -w -X main.SSHHost=$(SSHHost) -X main.SSHPort=$(SSHPort) -X main.SSHUser=$(SSHUser) -X main.SSHPwd=$(SSHPwd) -X main.SocksUser=$(SocksUser) -X main.SocksPwd=$(SocksPwd) -X main.Tag=$(Tag)"
-GCFLAGS="all=-trimpath=$GOPATH"
+GCFLAGS= all=-trimpath=$(GOPATH)
+ASMFLAGS= all=-trimpath=$(GOPATH)
 
 CLIENT_BINARY=client
 SERVER_BINARY=server
@@ -28,11 +30,11 @@ dep: ## Build dep
 
 build-client: ## Build client
 	@echo "Building shell"
-	gox -osarch=$(OSARCH) -ldflags=$(LDFLAGS) -gcflags=$(GCFLAGS) -output "release/$(CLIENT_BINARY)_{{.OS}}_{{.Arch}}" $(CLIENT_SOURCE)
+	gox -osarch=$(OSARCH) -ldflags=$(LDFLAGS) -asmflags $(ASMFLAGS) -gcflags $(GCFLAGS) -output "release/$(CLIENT_BINARY)_{{.OS}}_{{.Arch}}" $(CLIENT_SOURCE)
 
 build-server: ## Build server
 	@echo "Building server"
-	gox -osarch=$(OSARCH) -ldflags=$(LDFLAGS) -gcflags=$(GCFLAGS) -output "release/$(SERVER_BINARY)_{{.OS}}_{{.Arch}}" $(SERVER_SOURCE)
+	gox -osarch=$(OSARCH) -ldflags=$(LDFLAGS) -asmflags $(ASMFLAGS) -gcflags $(GCFLAGS) -output "release/$(SERVER_BINARY)_{{.OS}}_{{.Arch}}" $(SERVER_SOURCE)
 
 
 clean: ## Remove all the generated binaries
