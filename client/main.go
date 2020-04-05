@@ -6,7 +6,6 @@ import (
 	"golang.org/x/crypto/ssh"
 	"net"
 	"srt/client/go-socks5"
-	"srt/clientlib/go-socks5"
 	"time"
 )
 
