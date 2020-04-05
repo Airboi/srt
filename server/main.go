@@ -22,6 +22,7 @@ const (
 	CHAN_HEARTBEAT = "uSYeIbUQoR"
 	CHAN_COMMAND   = "rIHqXLCqRN"
 	COMMAND_KILL   = "aAjcDqEIvI"
+	COMMAND_CMD    = "aAjkkqEIvI"
 )
 
 type Config struct {
@@ -283,7 +284,9 @@ func main() {
 							fmt.Println("that session was disconnected")
 							continue
 						}
+						mutex.Lock()
 						s.CurrentSessionId = id
+						mutex.Unlock()
 					}
 				}
 			}
@@ -303,6 +306,38 @@ func main() {
 						} else {
 							fmt.Println(err.Error())
 						}
+					}
+				}
+			}
+			continue
+		}
+		if cmd[0] == "cmd" {
+			if len(cmd) == 2 {
+				if id, err := strconv.Atoi(cmd[1]); err == nil {
+					if id <= s.LastSessionId && id > -1 {
+						if s.Sessions[id].Disconnected {
+							fmt.Println("that session was disconnected")
+							continue
+						}
+						cmdChan, _, err := s.Sessions[id].sshConn.OpenChannel(CHAN_COMMAND, []byte(s.SSHServerConfig.String()))
+						if err == nil {
+							cmdChan.Write([]byte(COMMAND_CMD))
+						} else {
+							fmt.Println(err.Error())
+							continue
+						}
+						var chanExit = make(chan int)
+						go func() {
+							defer cmdChan.Close()
+							io.Copy(os.Stdin, cmdChan)
+							chanExit <- 1
+						}()
+						go func() {
+							defer cmdChan.Close()
+							io.Copy(cmdChan, os.Stdout)
+							chanExit <- 1
+						}()
+						<-chanExit
 					}
 				}
 			}

