@@ -420,9 +420,15 @@ func main() {
 							return
 						}
 						transChan.Write([]byte(TRANS_UP + desPath))
-						io.Copy(transChan, f)
+						n, err := io.Copy(transChan, f)
 						transChan.Close()
-						fmt.Println("Done: " + line)
+						if err != nil {
+							fmt.Println("cp failed: " + line)
+							fmt.Println(err.Error())
+							return
+						}
+						fmt.Println("done: " + line + " transferred: " + strconv.FormatInt(n, 10) + " bytes")
+						return
 
 					} else {
 						// client -> c&c
@@ -434,39 +440,18 @@ func main() {
 							return
 						}
 						transChan.Write([]byte(TRANS_DOWN + srcPath))
-						io.Copy(f, transChan)
+						n, err := io.Copy(f, transChan)
 						defer transChan.Close()
-						fmt.Println("Done: " + line)
+						if err != nil {
+							fmt.Println("cp failed: " + line)
+							fmt.Println(err.Error())
+							return
+						}
+						fmt.Println("done: " + line + " transferred: " + strconv.FormatInt(n, 10) + " bytes")
+						return
+
 					}
 				}()
-
-				if id, err := strconv.Atoi(cmd[1]); err == nil {
-					if id <= s.LastSessionId && id > -1 {
-						if s.Sessions[id].Disconnected {
-							fmt.Println("that session was disconnected")
-							continue
-						}
-						cmdChan, _, err := s.Sessions[id].sshConn.OpenChannel(CHAN_COMMAND, []byte(s.SSHServerConfig.String()))
-						if err == nil {
-							cmdChan.Write([]byte(COMMAND_CMD))
-						} else {
-							fmt.Println(err.Error())
-							continue
-						}
-						var chanExit = make(chan int)
-						go func() {
-							defer cmdChan.Close()
-							io.Copy(os.Stdin, cmdChan)
-							chanExit <- 1
-						}()
-						go func() {
-							defer cmdChan.Close()
-							io.Copy(cmdChan, os.Stdout)
-							chanExit <- 1
-						}()
-						<-chanExit
-					}
-				}
 			}
 			continue
 		}
